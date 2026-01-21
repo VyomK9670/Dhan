@@ -1,3 +1,4 @@
+
 import asyncio
 import websockets
 import json
@@ -91,8 +92,8 @@ class PaperOrder:
 
 
 @dataclass
-class ETFData:
-    """Data class for individual ETF"""
+class StockData:
+    """Data class for individual Stock"""
     security_id: str
     name: str
     bids: List[Dict] = None
@@ -146,28 +147,28 @@ class ETFData:
             self.current_price = None
 
 
-class BPIETFMonitor:
-    """Monitor for gold and silver ETFs with BPI calculation and paper trading"""
+class BPIStockMonitor:
+    """Monitor for stocks with BPI calculation and paper trading"""
     
     def __init__(self):
-        self.etfs: Dict[str, ETFData] = {}
+        self.stocks: Dict[str, StockData] = {}
         
-        # Gold and Silver ETFs on NSE India
-        self.etf_names = {
-            "12032": "GOLDBEES",
-            "15051": "HDFCMFGETF",
-            "27305": "KOTAKGOLD",
-            "34848": "AXISGOLD",
-            "26569": "SILVERBEES",
-            "28751": "HDFCMFSILVERETF",
-            "28769": "UTISILVERETF",
-            "12713": "MIRAEASSETGOLD",
-            "34866": "AXISSILVER",
-            "15052": "HDFCMFGOLDETF"
+        # NSE Stocks (replacing ETFs)
+        self.stock_names = {
+            "11536": "RELIANCE",  # Reliance Industries
+            "1660": "TCS",        # Tata Consultancy Services
+            "3045": "HDFCBANK",   # HDFC Bank
+            "1394": "INFY",       # Infosys
+            "1594": "ICICIBANK",  # ICICI Bank
+            "4963": "SBIN",       # State Bank of India
+            "772": "BHARTIARTL",  # Bharti Airtel
+            "10604": "ITC",       # ITC Limited
+            "881": "WIPRO",       # Wipro
+            "910": "LT"           # Larsen & Toubro
         }
         
         self._lock = threading.RLock()
-        self.selected_etfs = list(self.etf_names.keys())
+        self.selected_stocks = list(self.stock_names.keys())
         self.total_messages_received = 0
         self.start_time = datetime.now()
         
@@ -200,18 +201,18 @@ class BPIETFMonitor:
         self.display_update_counter = 0
         self.last_display_update = datetime.now()
         
-        # Initialize all ETFs
-        for etf_id in self.selected_etfs:
-            etf_name = self.etf_names.get(etf_id, etf_id)
-            self.etfs[etf_id] = ETFData(
-                security_id=etf_id,
-                name=etf_name
+        # Initialize all stocks
+        for stock_id in self.selected_stocks:
+            stock_name = self.stock_names.get(stock_id, stock_id)
+            self.stocks[stock_id] = StockData(
+                security_id=stock_id,
+                name=stock_name
             )
     
     def initialize_csv_files(self):
-        """Initialize CSV files for each ETF"""
-        for etf_id, etf_name in self.etf_names.items():
-            filename = os.path.join(self.csv_save_path, f"{etf_name}_{etf_id}_depth_data.csv")
+        """Initialize CSV files for each stock"""
+        for stock_id, stock_name in self.stock_names.items():
+            filename = os.path.join(self.csv_save_path, f"{stock_name}_{stock_id}_depth_data.csv")
             
             # Create file if it doesn't exist
             if not os.path.exists(filename):
@@ -219,7 +220,7 @@ class BPIETFMonitor:
                     writer = csv.writer(csvfile)
                     # Write headers
                     writer.writerow([
-                        'timestamp', 'security_id', 'etf_name',
+                        'timestamp', 'security_id', 'stock_name',
                         'bid_level', 'bid_price', 'bid_quantity', 'bid_orders',
                         'ask_level', 'ask_price', 'ask_quantity', 'ask_orders',
                         'best_bid', 'best_ask', 'ltp', 'spread'
@@ -229,34 +230,34 @@ class BPIETFMonitor:
             file_handle = open(filename, 'a', newline='')
             writer = csv.writer(file_handle)
             
-            self.csv_file_handles[etf_id] = file_handle
-            self.csv_files[etf_id] = writer
+            self.csv_file_handles[stock_id] = file_handle
+            self.csv_files[stock_id] = writer
     
-    def save_depth_data_to_csv(self, etf: ETFData):
+    def save_depth_data_to_csv(self, stock: StockData):
         """Save depth data to CSV file"""
         try:
-            if etf.security_id not in self.csv_files:
+            if stock.security_id not in self.csv_files:
                 return
             
-            writer = self.csv_files[etf.security_id]
+            writer = self.csv_files[stock.security_id]
             timestamp = datetime.now()
             
             # Get the maximum number of levels to save
-            max_levels = max(len(etf.bids), len(etf.asks))
+            max_levels = max(len(stock.bids), len(stock.asks))
             
             for level in range(max_levels):
-                row = [timestamp.isoformat(), etf.security_id, etf.name]
+                row = [timestamp.isoformat(), stock.security_id, stock.name]
                 
                 # Add bid data if available
-                if level < len(etf.bids):
-                    bid = etf.bids[level]
+                if level < len(stock.bids):
+                    bid = stock.bids[level]
                     row.extend([bid['level'], bid['price'], bid['quantity'], bid['orders']])
                 else:
                     row.extend(['', '', '', ''])
                 
                 # Add ask data if available
-                if level < len(etf.asks):
-                    ask = etf.asks[level]
+                if level < len(stock.asks):
+                    ask = stock.asks[level]
                     row.extend([ask['level'], ask['price'], ask['quantity'], ask['orders']])
                 else:
                     row.extend(['', '', '', ''])
@@ -264,10 +265,10 @@ class BPIETFMonitor:
                 # Add summary data (only for first row)
                 if level == 0:
                     row.extend([
-                        etf.best_bid if etf.best_bid else '',
-                        etf.best_ask if etf.best_ask else '',
-                        etf.ltp if etf.ltp else '',
-                        etf.spread if etf.spread else ''
+                        stock.best_bid if stock.best_bid else '',
+                        stock.best_ask if stock.best_ask else '',
+                        stock.ltp if stock.ltp else '',
+                        stock.spread if stock.spread else ''
                     ])
                 else:
                     row.extend(['', '', '', ''])
@@ -275,140 +276,140 @@ class BPIETFMonitor:
                 writer.writerow(row)
             
             # Flush to ensure data is written
-            self.csv_file_handles[etf.security_id].flush()
+            self.csv_file_handles[stock.security_id].flush()
             
         except Exception as e:
-            logger.error(f"Error saving depth data for {etf.security_id} to CSV: {e}")
+            logger.error(f"Error saving depth data for {stock.security_id} to CSV: {e}")
     
-    def update_etf(self, security_id: str, bids: List[Dict], asks: List[Dict]):
-        """Update ETF data and calculate BPI"""
+    def update_stock(self, security_id: str, bids: List[Dict], asks: List[Dict]):
+        """Update stock data and calculate BPI"""
         with self._lock:
-            if security_id not in self.etfs:
+            if security_id not in self.stocks:
                 return
             
-            etf = self.etfs[security_id]
+            stock = self.stocks[security_id]
             
-            # Update ETF data
-            etf.bids = bids
-            etf.asks = asks
-            etf.last_update = datetime.now()
-            etf.total_updates += 1
+            # Update stock data
+            stock.bids = bids
+            stock.asks = asks
+            stock.last_update = datetime.now()
+            stock.total_updates += 1
             self.total_messages_received += 1
             
             # Sort bids and asks
             if bids:
                 sorted_bids = sorted(bids, key=lambda x: x['price'], reverse=True)
-                etf.best_bid = sorted_bids[0]['price']
+                stock.best_bid = sorted_bids[0]['price']
             else:
-                etf.best_bid = None
+                stock.best_bid = None
             
             if asks:
                 sorted_asks = sorted(asks, key=lambda x: x['price'])
-                etf.best_ask = sorted_asks[0]['price']
+                stock.best_ask = sorted_asks[0]['price']
             else:
-                etf.best_ask = None
+                stock.best_ask = None
             
             # Calculate LTP as midpoint
-            if etf.best_bid and etf.best_ask:
-                etf.ltp = (etf.best_bid + etf.best_ask) / 2
-                etf.spread = etf.best_ask - etf.best_bid
-            elif etf.best_bid:
-                etf.ltp = etf.best_bid
-                etf.spread = 0
-            elif etf.best_ask:
-                etf.ltp = etf.best_ask
-                etf.spread = 0
+            if stock.best_bid and stock.best_ask:
+                stock.ltp = (stock.best_bid + stock.best_ask) / 2
+                stock.spread = stock.best_ask - stock.best_bid
+            elif stock.best_bid:
+                stock.ltp = stock.best_bid
+                stock.spread = 0
+            elif stock.best_ask:
+                stock.ltp = stock.best_ask
+                stock.spread = 0
             else:
-                etf.ltp = None
-                etf.spread = None
+                stock.ltp = None
+                stock.spread = None
             
             # Update current price
-            etf.update_current_price()
+            stock.update_current_price()
             
             # Calculate BPI
-            self.calculate_etf_bpi(etf)
+            self.calculate_stock_bpi(stock)
             
             # Save depth data to CSV
-            self.save_depth_data_to_csv(etf)
+            self.save_depth_data_to_csv(stock)
             
             # Check if we need to execute paper trading
-            self.check_paper_trading(etf)
+            self.check_paper_trading(stock)
             
             # Increment display counter
             self.display_update_counter += 1
     
-    def update_etf_status(self, security_id: str, status: str):
-        """Update connection status for an ETF"""
+    def update_stock_status(self, security_id: str, status: str):
+        """Update connection status for a stock"""
         with self._lock:
-            if security_id in self.etfs:
-                etf = self.etfs[security_id]
-                etf.connection_status = status
-                if status == "CONNECTED" and etf.connection_start_time is None:
-                    etf.connection_start_time = datetime.now()
+            if security_id in self.stocks:
+                stock = self.stocks[security_id]
+                stock.connection_status = status
+                if status == "CONNECTED" and stock.connection_start_time is None:
+                    stock.connection_start_time = datetime.now()
                 elif status == "DISCONNECTED":
-                    etf.connection_start_time = None
+                    stock.connection_start_time = None
     
-    def calculate_etf_bpi(self, etf: ETFData):
-        """Calculate BPI for a single ETF"""
+    def calculate_stock_bpi(self, stock: StockData):
+        """Calculate BPI for a single stock"""
         try:
             # Calculate bid pressure: Σ(BidPrice × BidOrders × BidQuantity)
-            etf.bid_pressure = sum(
+            stock.bid_pressure = sum(
                 bid['price'] * bid['orders'] * bid['quantity']
-                for bid in etf.bids
+                for bid in stock.bids
             ) / 1000000  # Normalize to millions
             
             # Calculate ask pressure: Σ(AskPrice × AskOrders × AskQuantity)
-            etf.ask_pressure = sum(
+            stock.ask_pressure = sum(
                 ask['price'] * ask['orders'] * ask['quantity']
-                for ask in etf.asks
+                for ask in stock.asks
             ) / 1000000  # Normalize to millions
             
             # Calculate BPI
-            if etf.ask_pressure > 0:
-                etf.bpi = etf.bid_pressure / etf.ask_pressure
+            if stock.ask_pressure > 0:
+                stock.bpi = stock.bid_pressure / stock.ask_pressure
             else:
-                etf.bpi = float('inf') if etf.bid_pressure > 0 else 1.0
+                stock.bpi = float('inf') if stock.bid_pressure > 0 else 1.0
             
             # Determine BPI signal
-            if etf.bpi is None:
-                etf.bpi_signal = "ERROR"
-            elif etf.bpi > 1.2:
-                etf.bpi_signal = "STRONG BUY"
-            elif etf.bpi > 1.05:
-                etf.bpi_signal = "BUY"
-            elif etf.bpi > 0.95:
-                etf.bpi_signal = "NEUTRAL"
-            elif etf.bpi > 0.8:
-                etf.bpi_signal = "SELL"
+            if stock.bpi is None:
+                stock.bpi_signal = "ERROR"
+            elif stock.bpi > 1.2:
+                stock.bpi_signal = "STRONG BUY"
+            elif stock.bpi > 1.05:
+                stock.bpi_signal = "BUY"
+            elif stock.bpi > 0.95:
+                stock.bpi_signal = "NEUTRAL"
+            elif stock.bpi > 0.8:
+                stock.bpi_signal = "SELL"
             else:
-                etf.bpi_signal = "STRONG SELL"
+                stock.bpi_signal = "STRONG SELL"
                 
         except Exception as e:
-            logger.error(f"Error calculating BPI for {etf.security_id}: {e}")
-            etf.bpi = None
-            etf.bpi_signal = "ERROR"
+            logger.error(f"Error calculating BPI for {stock.security_id}: {e}")
+            stock.bpi = None
+            stock.bpi_signal = "ERROR"
     
-    def get_highest_bpi_etf(self) -> Optional[ETFData]:
-        """Get ETF with highest BPI"""
+    def get_highest_bpi_stock(self) -> Optional[StockData]:
+        """Get stock with highest BPI"""
         with self._lock:
-            connected_etfs = [
-                etf for etf in self.etfs.values() 
-                if etf.connection_status == "CONNECTED" 
-                and etf.bpi is not None
-                and etf.current_price is not None
+            connected_stocks = [
+                stock for stock in self.stocks.values() 
+                if stock.connection_status == "CONNECTED" 
+                and stock.bpi is not None
+                and stock.current_price is not None
             ]
             
-            if not connected_etfs:
+            if not connected_stocks:
                 return None
             
             # Sort by BPI (highest first)
-            sorted_etfs = sorted(
-                connected_etfs,
+            sorted_stocks = sorted(
+                connected_stocks,
                 key=lambda x: x.bpi if x.bpi != float('inf') else float('inf'),
                 reverse=True
             )
             
-            return sorted_etfs[0] if sorted_etfs else None
+            return sorted_stocks[0] if sorted_stocks else None
     
     def check_time_for_order(self) -> bool:
         """Check if current time is 09:07:05 AM"""
@@ -419,7 +420,7 @@ class BPIETFMonitor:
             now.second == self.target_second
         )
     
-    def check_paper_trading(self, etf: ETFData):
+    def check_paper_trading(self, stock: StockData):
         """Check and execute paper trading logic"""
         with self._lock:
             # Check if we should place an order
@@ -428,27 +429,27 @@ class BPIETFMonitor:
                 not self.order_placed_today and
                 self.check_time_for_order()):
                 
-                highest_bpi_etf = self.get_highest_bpi_etf()
-                if highest_bpi_etf and highest_bpi_etf.current_price:
-                    self.place_paper_order(highest_bpi_etf)
+                highest_bpi_stock = self.get_highest_bpi_stock()
+                if highest_bpi_stock and highest_bpi_stock.current_price:
+                    self.place_paper_order(highest_bpi_stock)
                     self.order_placed_today = True
-                    logger.info(f"Paper order placed for {highest_bpi_etf.name} at {highest_bpi_etf.current_price}")
+                    logger.info(f"Paper order placed for {highest_bpi_stock.name} at {highest_bpi_stock.current_price}")
             
             # Check if we have an active order to monitor
-            if self.active_order and self.active_order.security_id == etf.security_id:
-                self.monitor_active_order(etf)
+            if self.active_order and self.active_order.security_id == stock.security_id:
+                self.monitor_active_order(stock)
     
-    def place_paper_order(self, etf: ETFData):
+    def place_paper_order(self, stock: StockData):
         """Place a paper buy order"""
         order_id = str(uuid.uuid4())[:8]
         
         self.active_order = PaperOrder(
             order_id=order_id,
-            security_id=etf.security_id,
-            name=etf.name,
+            security_id=stock.security_id,
+            name=stock.name,
             order_type=OrderType.BUY,
             quantity=self.quantity_to_trade,
-            entry_price=etf.current_price,
+            entry_price=stock.current_price,
             status=OrderStatus.PLACED,
             placed_time=datetime.now()
         )
@@ -457,32 +458,32 @@ class BPIETFMonitor:
         self.active_order.status = OrderStatus.FILLED
         self.active_order.filled_time = datetime.now()
         
-        logger.info(f"Paper BUY order filled for {etf.name}: {self.quantity_to_trade} shares at ₹{etf.current_price:.2f}")
+        logger.info(f"Paper BUY order filled for {stock.name}: {self.quantity_to_trade} shares at ₹{stock.current_price:.2f}")
     
-    def monitor_active_order(self, etf: ETFData):
+    def monitor_active_order(self, stock: StockData):
         """Monitor active order for exit conditions"""
         if not self.active_order or self.active_order.status != OrderStatus.FILLED:
             return
         
-        if not etf.current_price:
+        if not stock.current_price:
             return
         
         # Calculate current P&L
-        current_pnl, current_pnl_percent = self.active_order.calculate_pnl(etf.current_price)
+        current_pnl, current_pnl_percent = self.active_order.calculate_pnl(stock.current_price)
         
         # Check for 1% profit target
         if (current_pnl_percent and current_pnl_percent >= 1.0 and
             self.active_order.status == OrderStatus.FILLED):
             
             # Place sell order to exit
-            self.exit_paper_order(etf)
+            self.exit_paper_order(stock)
     
-    def exit_paper_order(self, etf: ETFData):
+    def exit_paper_order(self, stock: StockData):
         """Exit the paper order at current price"""
         if not self.active_order:
             return
         
-        self.active_order.exit_price = etf.current_price
+        self.active_order.exit_price = stock.current_price
         self.active_order.exit_time = datetime.now()
         self.active_order.status = OrderStatus.EXECUTED
         
@@ -524,7 +525,7 @@ class BPIETFMonitor:
                 
                 f.write(f"TRADE DETAILS:\n")
                 f.write(f"  Order ID:     {order.order_id}\n")
-                f.write(f"  ETF:          {order.name} ({order.security_id})\n")
+                f.write(f"  Stock:        {order.name} ({order.security_id})\n")
                 f.write(f"  Type:         {order.order_type.value}\n")
                 f.write(f"  Quantity:     {order.quantity} shares\n")
                 f.write(f"  Status:       {order.status.value}\n\n")
@@ -580,35 +581,42 @@ class BPIETFMonitor:
         except Exception as e:
             logger.error(f"Error saving to consolidated log: {e}")
     
-    def get_sorted_etfs(self) -> List[ETFData]:
-        """Get ETFs sorted by BPI (highest first)"""
+    def get_sorted_stocks(self) -> List[StockData]:
+        """Get stocks sorted by BPI (highest first)"""
         with self._lock:
-            valid_etfs = [
-                etf for etf in self.etfs.values() 
-                if etf.security_id in self.selected_etfs
+            valid_stocks = [
+                stock for stock in self.stocks.values() 
+                if stock.security_id in self.selected_stocks
             ]
             
             return sorted(
-                valid_etfs,
+                valid_stocks,
                 key=lambda x: (x.bpi is None, -x.bpi if x.bpi is not None and x.bpi != float('inf') else float('-inf')),
                 reverse=False
             )
     
-    def get_etf_count(self) -> tuple:
-        """Get counts of connected and total ETFs"""
+    def get_stock_count(self) -> tuple:
+        """Get counts of connected and total stocks"""
         with self._lock:
-            total = len(self.selected_etfs)
-            connected = sum(1 for s in self.etfs.values() 
-                          if s.security_id in self.selected_etfs and s.connection_status == "CONNECTED")
+            total = len(self.selected_stocks)
+            connected = sum(1 for s in self.stocks.values() 
+                          if s.security_id in self.selected_stocks and s.connection_status == "CONNECTED")
             return connected, total
     
-    def get_etf_type(self, etf_name: str) -> str:
-        """Determine if ETF is Gold or Silver based on name"""
-        etf_name_lower = etf_name.lower()
-        if "gold" in etf_name_lower:
-            return "GOLD"
-        elif "silver" in etf_name_lower:
-            return "SILVER"
+    def get_stock_sector(self, stock_name: str) -> str:
+        """Determine stock sector based on name"""
+        stock_name_lower = stock_name.lower()
+        
+        if "bank" in stock_name_lower:
+            return "BANKING"
+        elif any(tech in stock_name_lower for tech in ["tech", "infy", "tcs", "wipro"]):
+            return "IT"
+        elif any(infra in stock_name_lower for infra in ["reliance", "lt", "airtel"]):
+            return "INFRASTRUCTURE"
+        elif "itc" in stock_name_lower:
+            return "FMCG"
+        elif "sbi" in stock_name_lower:
+            return "BANKING"
         else:
             return "OTHER"
     
@@ -617,17 +625,17 @@ class BPIETFMonitor:
         with self._lock:
             runtime = (datetime.now() - self.start_time).total_seconds()
             
-            connected_etfs = [s for s in self.etfs.values() 
-                             if s.security_id in self.selected_etfs 
+            connected_stocks = [s for s in self.stocks.values() 
+                             if s.security_id in self.selected_stocks 
                              and s.connection_status == "CONNECTED"]
             
-            avg_update_rate = sum(etf.update_rate for etf in connected_etfs) / len(connected_etfs) if connected_etfs else 0
+            avg_update_rate = sum(stock.update_rate for stock in connected_stocks) / len(connected_stocks) if connected_stocks else 0
             
             return {
                 "runtime_seconds": runtime,
                 "total_messages": self.total_messages_received,
                 "messages_per_second": self.total_messages_received / runtime if runtime > 0 else 0,
-                "connected_count": len(connected_etfs),
+                "connected_count": len(connected_stocks),
                 "avg_update_rate": avg_update_rate,
                 "start_time": self.start_time,
                 "paper_trading_enabled": self.trading_enabled,
@@ -639,33 +647,33 @@ class BPIETFMonitor:
     def get_display_data(self) -> Dict:
         """Get formatted display data"""
         with self._lock:
-            sorted_etfs = self.get_sorted_etfs()
+            sorted_stocks = self.get_sorted_stocks()
             stats = self.get_statistics()
-            highest_etf = self.get_highest_bpi_etf()
+            highest_stock = self.get_highest_bpi_stock()
             
-            # Format ETF data for display
-            etf_display_data = []
-            for etf in sorted_etfs:
-                etf_type = self.get_etf_type(etf.name)
+            # Format stock data for display
+            stock_display_data = []
+            for stock in sorted_stocks:
+                stock_sector = self.get_stock_sector(stock.name)
                 
                 # Calculate target price
-                target_price = etf.current_price * 1.01 if etf.current_price else None
+                target_price = stock.current_price * 1.01 if stock.current_price else None
                 
-                etf_display_data.append({
-                    "security_id": etf.security_id,
-                    "name": etf.name,
-                    "type": etf_type,
-                    "connection_status": etf.connection_status,
-                    "bpi": etf.bpi,
-                    "bpi_signal": etf.bpi_signal,
-                    "current_price": etf.current_price,
+                stock_display_data.append({
+                    "security_id": stock.security_id,
+                    "name": stock.name,
+                    "sector": stock_sector,
+                    "connection_status": stock.connection_status,
+                    "bpi": stock.bpi,
+                    "bpi_signal": stock.bpi_signal,
+                    "current_price": stock.current_price,
                     "target_price": target_price,
-                    "bid_pressure": etf.bid_pressure,
-                    "ask_pressure": etf.ask_pressure,
-                    "update_age": (datetime.now() - etf.last_update).total_seconds(),
-                    "update_rate": etf.update_rate,
-                    "uptime": etf.uptime,
-                    "is_highest_bpi": highest_etf and etf.security_id == highest_etf.security_id
+                    "bid_pressure": stock.bid_pressure,
+                    "ask_pressure": stock.ask_pressure,
+                    "update_age": (datetime.now() - stock.last_update).total_seconds(),
+                    "update_rate": stock.update_rate,
+                    "uptime": stock.uptime,
+                    "is_highest_bpi": highest_stock and stock.security_id == highest_stock.security_id
                 })
             
             # Get active order data
@@ -683,16 +691,16 @@ class BPIETFMonitor:
                 }
                 
                 # Calculate current P&L if we have current price
-                etf = self.etfs.get(self.active_order.security_id)
-                if etf and etf.current_price:
-                    current_pnl, current_pnl_percent = self.active_order.calculate_pnl(etf.current_price)
-                    active_order_data["current_price"] = etf.current_price
+                stock = self.stocks.get(self.active_order.security_id)
+                if stock and stock.current_price:
+                    current_pnl, current_pnl_percent = self.active_order.calculate_pnl(stock.current_price)
+                    active_order_data["current_price"] = stock.current_price
                     active_order_data["current_pnl"] = current_pnl
                     active_order_data["current_pnl_percent"] = current_pnl_percent
                     
                     # Progress to target
                     if self.active_order.entry_price and self.active_order.target_price:
-                        progress = ((etf.current_price - self.active_order.entry_price) / 
+                        progress = ((stock.current_price - self.active_order.entry_price) / 
                                    (self.active_order.target_price - self.active_order.entry_price)) * 100
                         active_order_data["progress_to_target"] = progress
             
@@ -714,7 +722,7 @@ class BPIETFMonitor:
             self.last_display_update = datetime.now()
             
             return {
-                "etfs": etf_display_data,
+                "stocks": stock_display_data,
                 "stats": stats,
                 "active_order": active_order_data,
                 "last_order": last_order_data,
@@ -726,10 +734,10 @@ class BPIETFMonitor:
                     "order_placed_today": self.order_placed_today
                 },
                 "current_time": datetime.now(),
-                "highest_etf": {
-                    "security_id": highest_etf.security_id if highest_etf else None,
-                    "name": highest_etf.name if highest_etf else None,
-                    "bpi": highest_etf.bpi if highest_etf else None
+                "highest_stock": {
+                    "security_id": highest_stock.security_id if highest_stock else None,
+                    "name": highest_stock.name if highest_stock else None,
+                    "bpi": highest_stock.bpi if highest_stock else None
                 }
             }
     
@@ -745,7 +753,7 @@ class BPIETFMonitor:
 class CleanDashboard:
     """Clean dashboard without color coding"""
     
-    def __init__(self, monitor: BPIETFMonitor):
+    def __init__(self, monitor: BPIStockMonitor):
         self.monitor = monitor
         self.is_running = False
         self.refresh_rate = 0.5  # Update every 0.5 seconds
@@ -768,26 +776,28 @@ class CleanDashboard:
         }
         return icons.get(status, "[?]")
     
-    def get_etf_abbreviation(self, name: str) -> str:
-        """Get compact ETF abbreviation"""
-        if name == "GOLDBEES":
-            return "GLDB"
-        elif name == "SILVERBEES":
-            return "SLVB"
-        elif "HDFC" in name and "GOLD" in name:
-            return "HGLD"
-        elif "KOTAK" in name:
-            return "KGLD"
-        elif "AXIS" in name and "GOLD" in name:
-            return "AGLD"
-        elif "AXIS" in name and "SILVER" in name:
-            return "ASLV"
-        elif "MIRAE" in name:
-            return "MGLD"
-        elif "UTI" in name:
-            return "USLV"
-        elif "HDFC" in name and "SILVER" in name:
-            return "HSLV"
+    def get_stock_abbreviation(self, name: str) -> str:
+        """Get compact stock abbreviation"""
+        if name == "RELIANCE":
+            return "RIL"
+        elif name == "HDFCBANK":
+            return "HDFC"
+        elif name == "ICICIBANK":
+            return "ICICI"
+        elif name == "BHARTIARTL":
+            return "BRTL"
+        elif name == "INFY":
+            return "INFY"
+        elif name == "TCS":
+            return "TCS"
+        elif name == "SBIN":
+            return "SBI"
+        elif name == "ITC":
+            return "ITC"
+        elif name == "WIPRO":
+            return "WPRO"
+        elif name == "LT":
+            return "LT"
         else:
             return name[:4]
     
@@ -797,51 +807,51 @@ class CleanDashboard:
         stats = display_data["stats"]
         
         connected = stats["connected_count"]
-        total = len(self.monitor.selected_etfs)
+        total = len(self.monitor.selected_stocks)
         
         print("=" * 80)
-        print(f"ETF BPI PAPER TRADING MONITOR - {current_time}")
+        print(f"STOCK BPI PAPER TRADING MONITOR - {current_time}")
         print(f"Connected: {connected}/{total} | Msg/sec: {stats['messages_per_second']:.0f}")
         print("=" * 80)
     
-    def print_etf_table(self, display_data: Dict):
-        """Print clean ETF table"""
+    def print_stock_table(self, display_data: Dict):
+        """Print clean stock table"""
         # Header
-        print(f"{'#':<2} {'ETF':<6} {'Conn':<5} {'BPI':<7} {'Signal':<10} {'Price':<10} {'Target':<10}")
+        print(f"{'#':<2} {'Stock':<6} {'Conn':<5} {'BPI':<7} {'Signal':<10} {'Price':<10} {'Target':<10}")
         print("-" * 80)
         
-        # ETF rows
-        for i, etf in enumerate(display_data["etfs"], 1):
-            # ETF abbreviation
-            etf_abbr = self.get_etf_abbreviation(etf["name"])
+        # Stock rows
+        for i, stock in enumerate(display_data["stocks"], 1):
+            # Stock abbreviation
+            stock_abbr = self.get_stock_abbreviation(stock["name"])
             
             # Connection status
-            conn_icon = self.get_connection_icon(etf["connection_status"])
+            conn_icon = self.get_connection_icon(stock["connection_status"])
             
             # BPI and signal
-            if etf["bpi"] is None:
+            if stock["bpi"] is None:
                 bpi_str = "N/A"
                 signal_str = "N/A"
             else:
-                if etf["bpi"] == float('inf'):
+                if stock["bpi"] == float('inf'):
                     bpi_str = "∞"
                 else:
-                    bpi_str = f"{etf['bpi']:.2f}"
-                signal_str = etf["bpi_signal"]
+                    bpi_str = f"{stock['bpi']:.2f}"
+                signal_str = stock["bpi_signal"]
             
             # Price and target
-            if etf["current_price"]:
-                price_str = f"₹{etf['current_price']:.2f}"
-                target_str = f"₹{etf['target_price']:.2f}" if etf["target_price"] else "N/A"
+            if stock["current_price"]:
+                price_str = f"₹{stock['current_price']:.2f}"
+                target_str = f"₹{stock['target_price']:.2f}" if stock["target_price"] else "N/A"
             else:
                 price_str = "N/A"
                 target_str = "N/A"
             
             # Highlight if it's the highest BPI
-            row_prefix = "▶ " if etf["is_highest_bpi"] else "  "
+            row_prefix = "▶ " if stock["is_highest_bpi"] else "  "
             
             # Print row
-            print(f"{row_prefix}{i:<2} {etf_abbr:<6} {conn_icon:<5} {bpi_str:<7} "
+            print(f"{row_prefix}{i:<2} {stock_abbr:<6} {conn_icon:<5} {bpi_str:<7} "
                   f"{signal_str:<10} {price_str:<10} {target_str:<10}")
         
         print("-" * 80)
@@ -922,9 +932,9 @@ class CleanDashboard:
         self.clear_screen()
         
         # Calculate total lines for the display
-        total_etfs = len(self.monitor.selected_etfs)
+        total_stocks = len(self.monitor.selected_stocks)
         header_height = 4
-        table_height = total_etfs + 3  # Header + ETF rows + separator
+        table_height = total_stocks + 3  # Header + Stock rows + separator
         trading_height = 6
         system_height = 2
         
@@ -940,7 +950,7 @@ class CleanDashboard:
                 
                 # Print all sections
                 self.print_header(display_data)
-                self.print_etf_table(display_data)
+                self.print_stock_table(display_data)
                 self.print_trading_status(display_data)
                 self.print_system_info(display_data)
                 
@@ -963,9 +973,9 @@ class CleanDashboard:
 
 
 class WebSocketManager:
-    """Manages WebSocket connections for multiple ETFs with high reliability"""
+    """Manages WebSocket connections for multiple stocks with high reliability"""
     
-    def __init__(self, token: str, client_id: str, monitor: BPIETFMonitor):
+    def __init__(self, token: str, client_id: str, monitor: BPIStockMonitor):
         self.token = token
         self.client_id = client_id
         self.monitor = monitor
@@ -978,13 +988,13 @@ class WebSocketManager:
         self.failed_connections = 0
         
     async def maintain_connection(self, security_id: str):
-        """Maintain persistent connection to a single ETF"""
+        """Maintain persistent connection to a single stock"""
         uri = f"wss://full-depth-api.dhan.co/twohundreddepth?token={self.token}&clientId={self.client_id}&authType=2"
         
         while self.is_running:
             try:
                 # Update status to connecting
-                self.monitor.update_etf_status(security_id, "CONNECTING")
+                self.monitor.update_stock_status(security_id, "CONNECTING")
                 
                 # Connect with aggressive timeout settings
                 websocket = await asyncio.wait_for(
@@ -1015,7 +1025,7 @@ class WebSocketManager:
                 logger.debug(f"Subscribed to {security_id}")
                 
                 # Update status to connected
-                self.monitor.update_etf_status(security_id, "CONNECTED")
+                self.monitor.update_stock_status(security_id, "CONNECTED")
                 
                 # Heartbeat and message processing
                 last_ping = time.time()
@@ -1034,7 +1044,7 @@ class WebSocketManager:
                         if isinstance(message, bytes):
                             depth_data = parse_market_depth_message(message)
                             if depth_data:
-                                self.monitor.update_etf(
+                                self.monitor.update_stock(
                                     security_id,
                                     depth_data['market_depth']['bids'],
                                     depth_data['market_depth']['asks']
@@ -1076,7 +1086,7 @@ class WebSocketManager:
                 self.failed_connections += 1
             
             # Update status to disconnected
-            self.monitor.update_etf_status(security_id, "DISCONNECTED")
+            self.monitor.update_stock_status(security_id, "DISCONNECTED")
             
             # Exponential backoff with jitter
             retry_delay = min(2 ** min(self.failed_connections, 5), 30)
@@ -1088,17 +1098,17 @@ class WebSocketManager:
                 await asyncio.sleep(retry_delay)
     
     async def start(self):
-        """Start maintaining connections to all ETFs"""
+        """Start maintaining connections to all stocks"""
         self.is_running = True
         
-        logger.info(f"Starting connections to {len(self.monitor.selected_etfs)} ETFs...")
+        logger.info(f"Starting connections to {len(self.monitor.selected_stocks)} stocks...")
         
-        # Create connection tasks for all ETFs
+        # Create connection tasks for all stocks
         tasks = []
-        for etf_id in self.monitor.selected_etfs:
-            task = asyncio.create_task(self.maintain_connection(etf_id))
+        for stock_id in self.monitor.selected_stocks:
+            task = asyncio.create_task(self.maintain_connection(stock_id))
             tasks.append(task)
-            self.connection_tasks[etf_id] = task
+            self.connection_tasks[stock_id] = task
             
             # Small delay to avoid overwhelming the server
             await asyncio.sleep(0.1)
@@ -1203,9 +1213,9 @@ async def main():
     CLIENT_ID = '1108703565'
     
     print("\n" + "="*80)
-    print("ETF BPI PAPER TRADING MONITOR")
+    print("STOCK BPI PAPER TRADING MONITOR")
     print("="*80)
-    print("• Monitors 10 ETFs in real-time")
+    print("• Monitors 10 stocks in real-time")
     print("• Paper trade at 09:07:05 AM (highest BPI)")
     print("• Auto-exit at 1% profit")
     print("• Trades saved to text files")
@@ -1213,7 +1223,7 @@ async def main():
     print("\nInitializing...")
     
     # Create monitor and dashboard
-    monitor = BPIETFMonitor()
+    monitor = BPIStockMonitor()
     dashboard = CleanDashboard(monitor)
     
     # Create WebSocket manager
