@@ -205,13 +205,10 @@ class CleanDashboard:
         for i, (stock_id, data) in enumerate(stocks.items(), 1):
             # Status indicator
             if data['connection'] == "CONNECTED":
-                status = f"{self.color('●', 'GREEN')} CON"
                 status_disp = f"{self.color('● CON', 'GREEN')}"
             elif data['connection'] == "CONNECTING":
-                status = f"{self.color('●', 'YELLOW')} CON"
                 status_disp = f"{self.color('● CON', 'YELLOW')}"
             else:
-                status = f"{self.color('✗', 'RED')} DIS"
                 status_disp = f"{self.color('✗ DIS', 'RED')}"
             
             # Format prices
@@ -251,7 +248,7 @@ class CleanDashboard:
         stock_id, data = selected_stock
         
         print(f"{self.color('┌─────────────────────────────────────────────────────────────────────┐', 'BLUE')}")
-        print(f"{self.color('│', 'BLUE')} {self.color(f'DEPTH DETAILS: {data["name"]}', 'BOLD'):<59} {self.color('│', 'BLUE')}")
+        print(f"{self.color('│', 'BLUE')} {self.color('DEPTH DETAILS: ' + data['name'], 'BOLD'):<59} {self.color('│', 'BLUE')}")
         print(f"{self.color('├──────────────────┬──────────────────┬──────────────────┬────────────┤', 'BLUE')}")
         print(f"{self.color('│', 'BLUE')} {self.color('Bids (Top 5)', 'GREEN'):<16} {self.color('│', 'BLUE')} "
               f"{self.color('Price', 'DIM'):<16} {self.color('│', 'BLUE')} "
