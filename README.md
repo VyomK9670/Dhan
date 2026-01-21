@@ -5,7 +5,7 @@ import struct
 from datetime import datetime
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import os
 import sys
 
@@ -16,20 +16,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class DepthDataMonitor:
+class StockMonitor:
     """Monitor for real-time 200-depth market data for a specific stock"""
     
     def __init__(self, security_id: str, stock_name: str):
         self.security_id = security_id
         self.stock_name = stock_name
         
-        # Market data storage
-        self.bids: List[Dict] = []  # 100 bid levels
-        self.asks: List[Dict] = []  # 100 ask levels
+        # Market data storage (store all 100 levels for calculations)
+        self.all_bids: List[Dict] = []  # All 100 bid levels
+        self.all_asks: List[Dict] = []  # All 100 ask levels
         self.best_bid: Optional[float] = None
         self.best_ask: Optional[float] = None
         self.ltp: Optional[float] = None
         self.last_update: datetime = datetime.now()
+        
+        # Column sums from ALL 100 levels
+        self.bid_qty_sum: int = 0
+        self.bid_orders_sum: int = 0
+        self.bid_total_value: float = 0  # Sum of (price * quantity)
+        
+        self.ask_qty_sum: int = 0
+        self.ask_orders_sum: int = 0
+        self.ask_total_value: float = 0  # Sum of (price * quantity)
         
         # Statistics
         self.total_messages = 0
@@ -39,20 +48,19 @@ class DepthDataMonitor:
         # Connection status
         self.connected = False
         
-        # Display cache for in-place updates
-        self.last_display_values = {
-            'ltp': None,
-            'best_bid': None,
-            'best_ask': None,
-            'bids': [None] * 10,
-            'asks': [None] * 10,
-            'status': None
-        }
+        # Price statistics
+        self.bid_avg_price: float = 0
+        self.ask_avg_price: float = 0
+        self.bid_max_price: float = 0
+        self.bid_min_price: float = 0
+        self.ask_max_price: float = 0
+        self.ask_min_price: float = 0
     
     def update_market_data(self, bids: List[Dict], asks: List[Dict]):
-        """Update market depth data"""
-        self.bids = bids
-        self.asks = asks
+        """Update market depth data and calculate sums"""
+        # Store all 100 levels
+        self.all_bids = bids
+        self.all_asks = asks
         
         # Sort bids (highest to lowest) and asks (lowest to highest)
         if bids:
@@ -77,6 +85,9 @@ class DepthDataMonitor:
         else:
             self.ltp = None
         
+        # Calculate column sums from ALL 100 levels
+        self.calculate_column_sums()
+        
         # Track update rate
         self.last_update = datetime.now()
         self.total_messages += 1
@@ -88,40 +99,81 @@ class DepthDataMonitor:
         self.message_timestamps = [t for t in self.message_timestamps if t > cutoff]
         self.message_rate = len(self.message_timestamps) / 5 if self.message_timestamps else 0
     
+    def calculate_column_sums(self):
+        """Calculate sums of all columns from all 100 levels"""
+        # Reset sums
+        self.bid_qty_sum = 0
+        self.bid_orders_sum = 0
+        self.bid_total_value = 0
+        self.ask_qty_sum = 0
+        self.ask_orders_sum = 0
+        self.ask_total_value = 0
+        
+        # Initialize price statistics
+        if self.all_bids:
+            bid_prices = [bid['price'] for bid in self.all_bids]
+            self.bid_max_price = max(bid_prices)
+            self.bid_min_price = min(bid_prices)
+        else:
+            self.bid_max_price = 0
+            self.bid_min_price = 0
+            
+        if self.all_asks:
+            ask_prices = [ask['price'] for ask in self.all_asks]
+            self.ask_max_price = max(ask_prices)
+            self.ask_min_price = min(ask_prices)
+        else:
+            self.ask_max_price = 0
+            self.ask_min_price = 0
+        
+        # Sum all bid levels (100 levels)
+        for bid in self.all_bids:
+            self.bid_qty_sum += bid.get('quantity', 0)
+            self.bid_orders_sum += bid.get('orders', 0)
+            self.bid_total_value += bid.get('price', 0) * bid.get('quantity', 0)
+        
+        # Sum all ask levels (100 levels)
+        for ask in self.all_asks:
+            self.ask_qty_sum += ask.get('quantity', 0)
+            self.ask_orders_sum += ask.get('orders', 0)
+            self.ask_total_value += ask.get('price', 0) * ask.get('quantity', 0)
+        
+        # Calculate average prices
+        if self.bid_qty_sum > 0:
+            self.bid_avg_price = self.bid_total_value / self.bid_qty_sum
+        else:
+            self.bid_avg_price = 0
+            
+        if self.ask_qty_sum > 0:
+            self.ask_avg_price = self.ask_total_value / self.ask_qty_sum
+        else:
+            self.ask_avg_price = 0
+    
+    def get_summary_data(self) -> Dict:
+        """Get summary data for this stock"""
+        return {
+            'stock_name': self.stock_name,
+            'ltp': self.ltp or 0,
+            'best_bid': self.best_bid or 0,
+            'best_ask': self.best_ask or 0,
+            'bid_qty_sum': self.bid_qty_sum,
+            'bid_orders_sum': self.bid_orders_sum,
+            'bid_avg_price': self.bid_avg_price,
+            'ask_qty_sum': self.ask_qty_sum,
+            'ask_orders_sum': self.ask_orders_sum,
+            'ask_avg_price': self.ask_avg_price,
+            'total_qty': self.bid_qty_sum + self.ask_qty_sum,
+            'total_orders': self.bid_orders_sum + self.ask_orders_sum,
+            'bid_total_value': self.bid_total_value,
+            'ask_total_value': self.ask_total_value,
+            'message_rate': self.message_rate,
+            'connected': self.connected,
+            'last_update': (datetime.now() - self.last_update).total_seconds()
+        }
+    
     def update_connection_status(self, status: bool):
         """Update connection status"""
         self.connected = status
-    
-    def get_changed_values(self) -> Dict:
-        """Get only the values that have changed since last update"""
-        current_values = {
-            'ltp': self.ltp,
-            'best_bid': self.best_bid,
-            'best_ask': self.best_ask,
-            'bids': self.bids[:10] if len(self.bids) >= 10 else self.bids + [None] * (10 - len(self.bids)),
-            'asks': self.asks[:10] if len(self.asks) >= 10 else self.asks + [None] * (10 - len(self.asks)),
-            'status': f"Updates: {self.total_messages:,} | Rate: {self.message_rate:.1f}/s"
-        }
-        
-        # Find what changed
-        changes = {}
-        for key in current_values:
-            if current_values[key] != self.last_display_values[key]:
-                changes[key] = current_values[key]
-        
-        # Update cache
-        self.last_display_values = current_values
-        
-        return changes
-    
-    def get_static_table_positions(self) -> Dict:
-        """Get line positions for each value in the static table"""
-        # Line positions (0-indexed)
-        return {
-            'header_line': 4,  # Stock info line
-            'table_start': 6,  # Start of table data
-            'status_line': 18  # Status line
-        }
 
 
 def parse_market_depth_message(message: bytes):
@@ -188,7 +240,7 @@ def parse_market_depth_message(message: bytes):
 class WebSocketDepthClient:
     """WebSocket client for real-time depth data"""
     
-    def __init__(self, token: str, client_id: str, monitor: DepthDataMonitor):
+    def __init__(self, token: str, client_id: str, monitor: StockMonitor):
         self.token = token
         self.client_id = client_id
         self.monitor = monitor
@@ -249,7 +301,7 @@ class WebSocketDepthClient:
                         # Process binary message
                         if isinstance(message, bytes):
                             depth_data = parse_market_depth_message(message)
-                            if depth_data:
+                            if depth_data and str(depth_data['security_id']) == str(self.monitor.security_id):
                                 # Update monitor with new depth data
                                 self.monitor.update_market_data(
                                     depth_data['market_depth']['bids'],
@@ -313,122 +365,269 @@ class WebSocketDepthClient:
                 pass
 
 
-class StaticTableDisplay:
-    """Display with static table that only updates values - table printed once"""
+class AllStocksSummaryDisplay:
+    """Display showing summary data for ALL stocks in a static table"""
     
-    def __init__(self, monitor: DepthDataMonitor):
-        self.monitor = monitor
+    def __init__(self, monitors: List[StockMonitor]):
+        self.monitors = monitors
         self.is_running = False
-        self.refresh_rate = 0.3  # Update every 0.3 seconds
-        self.table_height = 20  # Total lines in static display
+        self.refresh_rate = 0.5  # Update every 0.5 seconds
+        
+        # Fixed table dimensions
+        self.total_height = 0  # Will be calculated based on number of stocks
+        self.header_line = 5    # Line for header info
+        self.table_start = 7    # Start of table rows
+        self.status_line = 0    # Will be calculated
+        
+        # Fixed column widths for consistent layout
+        self.column_widths = {
+            'stock': 12,
+            'ltp': 10,
+            'bid': 10,
+            'ask': 10,
+            'spread': 10,
+            'bid_qty': 15,
+            'ask_qty': 15,
+            'bid_orders': 15,
+            'ask_orders': 15,
+            'bid_avg': 12,
+            'ask_avg': 12,
+            'total_qty': 15,
+            'status': 8
+        }
+        
         self.initialized = False
+        self.last_update_time = datetime.now()
         
     def clear_screen(self):
         """Clear terminal screen - called only once at start"""
         os.system('cls' if os.name == 'nt' else 'clear')
     
     def print_static_table(self):
-        """Print the static table structure ONE TIME ONLY"""
-        print("\n" + "="*80)
-        print("📊 REAL-TIME MARKET DEPTH DATA")
-        print("="*80)
-        print("Press Ctrl+C to exit")
-        print("="*80 + "\n")
+        """Print the static summary table ONE TIME ONLY"""
+        # Clear screen once
+        self.clear_screen()
         
-        # Stock info line (will be updated with values)
-        print(" " * 100)
+        # Calculate table height based on number of stocks
+        num_stocks = len(self.monitors)
+        self.total_height = num_stocks + 10  # Header + stocks + summary + status
+        self.status_line = self.total_height - 2
+        
+        # Print header section
+        print("\n" + "="*180)
+        print("📊 ALL STOCKS MARKET DEPTH SUMMARY (Data from ALL 100 Levels)")
+        print("="*180)
+        print("Auto-monitoring all 10 stocks | Press Ctrl+C to exit")
+        print("="*180 + "\n")
+        
+        # Information line
+        print("SUMMARY DATA - Hiding individual bid/ask levels, showing only column sums from 100 depth levels")
+        print("─" * 180)
+        
+        # Table header with fixed column widths
+        header = f"{'Stock':>{self.column_widths['stock']}} | " \
+                 f"{'LTP':>{self.column_widths['ltp']}} | " \
+                 f"{'Best Bid':>{self.column_widths['bid']}} | " \
+                 f"{'Best Ask':>{self.column_widths['ask']}} | " \
+                 f"{'Spread':>{self.column_widths['spread']}} | " \
+                 f"{'Bid Qty SUM':>{self.column_widths['bid_qty']}} | " \
+                 f"{'Ask Qty SUM':>{self.column_widths['ask_qty']}} | " \
+                 f"{'Bid Orders SUM':>{self.column_widths['bid_orders']}} | " \
+                 f"{'Ask Orders SUM':>{self.column_widths['ask_orders']}} | " \
+                 f"{'Bid Avg':>{self.column_widths['bid_avg']}} | " \
+                 f"{'Ask Avg':>{self.column_widths['ask_avg']}} | " \
+                 f"{'Total Qty':>{self.column_widths['total_qty']}} | " \
+                 f"{'Status':>{self.column_widths['status']}}"
+        print(header)
+        print("─" * 180)
+        
+        # Stock rows with placeholders
+        for i, monitor in enumerate(self.monitors):
+            row = f"{monitor.stock_name:>{self.column_widths['stock']}} | " \
+                  f"{'-':>{self.column_widths['ltp']}} | " \
+                  f"{'-':>{self.column_widths['bid']}} | " \
+                  f"{'-':>{self.column_widths['ask']}} | " \
+                  f"{'-':>{self.column_widths['spread']}} | " \
+                  f"{'-':>{self.column_widths['bid_qty']}} | " \
+                  f"{'-':>{self.column_widths['ask_qty']}} | " \
+                  f"{'-':>{self.column_widths['bid_orders']}} | " \
+                  f"{'-':>{self.column_widths['ask_orders']}} | " \
+                  f"{'-':>{self.column_widths['bid_avg']}} | " \
+                  f"{'-':>{self.column_widths['ask_avg']}} | " \
+                  f"{'-':>{self.column_widths['total_qty']}} | " \
+                  f"{'⏳':>{self.column_widths['status']}}"
+            print(row)
         
         # Separator
-        print("─" * 100)
+        print("─" * 180)
         
-        # Table header (static - printed once)
-        print(f"{'Level':>6} | {'Bid Price':>10} | {'Bid Qty':>12} | {'Bid Orders':>10} || {'Ask Price':>10} | {'Ask Qty':>12} | {'Ask Orders':>10}")
-        print("─" * 100)
+        # Grand totals row (will be updated)
+        print(f"{'GRAND TOTALS':>{self.column_widths['stock']}} | " \
+              f"{' ':>{self.column_widths['ltp']}} | " \
+              f"{' ':>{self.column_widths['bid']}} | " \
+              f"{' ':>{self.column_widths['ask']}} | " \
+              f"{' ':>{self.column_widths['spread']}} | " \
+              f"{'-':>{self.column_widths['bid_qty']}} | " \
+              f"{'-':>{self.column_widths['ask_qty']}} | " \
+              f"{'-':>{self.column_widths['bid_orders']}} | " \
+              f"{'-':>{self.column_widths['ask_orders']}} | " \
+              f"{'-':>{self.column_widths['bid_avg']}} | " \
+              f"{'-':>{self.column_widths['ask_avg']}} | " \
+              f"{'-':>{self.column_widths['total_qty']}} | " \
+              f"{' ':>{self.column_widths['status']}}")
         
-        # Table rows (10 rows - printed once with placeholders)
-        for i in range(10):
-            print(f"{i+1:6} | {'-':>10} | {'-':>12} | {'-':>10} || {'-':>10} | {'-':>12} | {'-':>10}")
+        # Status line (will be updated)
+        print("─" * 180)
+        print(" " * 180)
         
-        # Separator
-        print("─" * 100)
-        
-        # Status line (will be updated with values)
-        print(" " * 100)
-        
-        # Save cursor position at the bottom
+        # Save cursor position at the bottom for later restoration
         print("\033[s", end="")
         sys.stdout.flush()
+        
+        self.initialized = True
     
     def update_table_value(self, line_num: int, text: str):
-        """Update a specific line in the existing table without reprinting"""
-        # Move cursor up to the line we want to update
-        print(f"\033[{line_num + 1}H", end="")
-        # Clear that line
-        print("\033[2K", end="")
-        # Print new text
-        print(text)
-        # Move cursor back to saved position (bottom)
-        print("\033[u", end="")
+        """Update a specific line in the existing table using cursor positioning"""
+        # Move cursor to specific line, clear it, and print new content
+        print("\033[u", end="")  # Restore cursor to saved position
+        print(f"\033[{self.total_height - line_num}A", end="")  # Move up to target line
+        print("\033[2K", end="")  # Clear entire line
+        print(text)  # Print new content
+        print("\033[s", end="")  # Save cursor position again
         sys.stdout.flush()
     
-    def update_header_line(self):
-        """Update only the stock info header line"""
-        if self.monitor.ltp and self.monitor.best_bid and self.monitor.best_ask:
-            spread = self.monitor.best_ask - self.monitor.best_bid
-            spread_pct = (spread / self.monitor.ltp * 100) if self.monitor.ltp else 0
-            header_text = f"📊 {self.monitor.stock_name} | LTP: ₹{self.monitor.ltp:.2f} | Bid: ₹{self.monitor.best_bid:.2f} | Ask: ₹{self.monitor.best_ask:.2f} | Spread: ₹{spread:.2f} ({spread_pct:.2f}%)"
-            self.update_table_value(5, header_text)
-        else:
-            header_text = f"📊 {self.monitor.stock_name} | Waiting for data..."
-            self.update_table_value(5, header_text)
-    
-    def update_table_rows(self):
-        """Update only the 10 bid/ask rows - values change, table stays same"""
-        for i in range(10):
-            bid_data = self.monitor.bids[i] if i < len(self.monitor.bids) else None
-            ask_data = self.monitor.asks[i] if i < len(self.monitor.asks) else None
+    def update_stock_rows(self):
+        """Update all stock rows with current summary data"""
+        for i, monitor in enumerate(self.monitors):
+            summary = monitor.get_summary_data()
             
-            # Line number calculation (starting from line 8 for first data row)
-            line_num = 8 + i
+            # Calculate spread
+            spread = summary['best_ask'] - summary['best_bid'] if summary['best_bid'] and summary['best_ask'] else 0
+            spread_pct = (spread / summary['ltp'] * 100) if summary['ltp'] > 0 else 0
             
-            if bid_data and ask_data:
-                row_text = f"{i+1:6} | {bid_data['price']:10.2f} | {bid_data['quantity']:12,d} | {bid_data['orders']:10,d} || {ask_data['price']:10.2f} | {ask_data['quantity']:12,d} | {ask_data['orders']:10,d}"
-            elif bid_data:
-                row_text = f"{i+1:6} | {bid_data['price']:10.2f} | {bid_data['quantity']:12,d} | {bid_data['orders']:10,d} || {'-':>10} | {'-':>12} | {'-':>10}"
-            elif ask_data:
-                row_text = f"{i+1:6} | {'-':>10} | {'-':>12} | {'-':>10} || {ask_data['price']:10.2f} | {ask_data['quantity']:12,d} | {ask_data['orders']:10,d}"
+            # Format spread display
+            if spread > 0:
+                spread_display = f"{spread:.2f}"
             else:
-                row_text = f"{i+1:6} | {'-':>10} | {'-':>12} | {'-':10} || {'-':>10} | {'-':>12} | {'-':>10}"
+                spread_display = f"{spread:.2f}"
             
-            self.update_table_value(line_num, row_text)
+            # Determine status indicator
+            if not summary['connected']:
+                status = "🔴"
+            elif summary['last_update'] > 5:
+                status = "🟡"
+            else:
+                status = "🟢"
+            
+            # Format the row
+            row_text = f"{summary['stock_name']:>{self.column_widths['stock']}} | " \
+                      f"{summary['ltp']:>{self.column_widths['ltp']}.2f} | " \
+                      f"{summary['best_bid']:>{self.column_widths['bid']}.2f} | " \
+                      f"{summary['best_ask']:>{self.column_widths['ask']}.2f} | " \
+                      f"{spread_display:>{self.column_widths['spread']}} | " \
+                      f"{summary['bid_qty_sum']:>{self.column_widths['bid_qty']},d} | " \
+                      f"{summary['ask_qty_sum']:>{self.column_widths['ask_qty']},d} | " \
+                      f"{summary['bid_orders_sum']:>{self.column_widths['bid_orders']},d} | " \
+                      f"{summary['ask_orders_sum']:>{self.column_widths['ask_orders']},d} | " \
+                      f"{summary['bid_avg_price']:>{self.column_widths['bid_avg']}.2f} | " \
+                      f"{summary['ask_avg_price']:>{self.column_widths['ask_avg']}.2f} | " \
+                      f"{summary['total_qty']:>{self.column_widths['total_qty']},d} | " \
+                      f"{status:>{self.column_widths['status']}}"
+            
+            # Update this row (starting from line 7)
+            self.update_table_value(self.table_start + i, row_text)
+    
+    def update_grand_totals(self):
+        """Update the grand totals row with sums from all stocks"""
+        # Calculate grand totals
+        total_bid_qty = 0
+        total_ask_qty = 0
+        total_bid_orders = 0
+        total_ask_orders = 0
+        total_qty = 0
+        total_bid_value = 0
+        total_ask_value = 0
+        
+        connected_stocks = 0
+        total_messages = 0
+        
+        for monitor in self.monitors:
+            summary = monitor.get_summary_data()
+            total_bid_qty += summary['bid_qty_sum']
+            total_ask_qty += summary['ask_qty_sum']
+            total_bid_orders += summary['bid_orders_sum']
+            total_ask_orders += summary['ask_orders_sum']
+            total_qty += summary['total_qty']
+            total_bid_value += summary['bid_total_value']
+            total_ask_value += summary['ask_total_value']
+            total_messages += monitor.total_messages
+            
+            if summary['connected']:
+                connected_stocks += 1
+        
+        # Calculate weighted averages
+        if total_bid_qty > 0:
+            grand_bid_avg = total_bid_value / total_bid_qty
+        else:
+            grand_bid_avg = 0
+            
+        if total_ask_qty > 0:
+            grand_ask_avg = total_ask_value / total_ask_qty
+        else:
+            grand_ask_avg = 0
+        
+        # Format grand totals row
+        totals_text = f"{'GRAND TOTALS':>{self.column_widths['stock']}} | " \
+                     f"{' ':>{self.column_widths['ltp']}} | " \
+                     f"{' ':>{self.column_widths['bid']}} | " \
+                     f"{' ':>{self.column_widths['ask']}} | " \
+                     f"{' ':>{self.column_widths['spread']}} | " \
+                     f"{total_bid_qty:>{self.column_widths['bid_qty']},d} | " \
+                     f"{total_ask_qty:>{self.column_widths['ask_qty']},d} | " \
+                     f"{total_bid_orders:>{self.column_widths['bid_orders']},d} | " \
+                     f"{total_ask_orders:>{self.column_widths['ask_orders']},d} | " \
+                     f"{grand_bid_avg:>{self.column_widths['bid_avg']}.2f} | " \
+                     f"{grand_ask_avg:>{self.column_widths['ask_avg']}.2f} | " \
+                     f"{total_qty:>{self.column_widths['total_qty']},d} | " \
+                     f"{'Σ':>{self.column_widths['status']}}"
+        
+        # Update grand totals row (line after all stock rows)
+        self.update_table_value(self.table_start + len(self.monitors), totals_text)
     
     def update_status_line(self):
-        """Update only the status line"""
-        age = (datetime.now() - self.monitor.last_update).total_seconds()
-        if not self.monitor.connected:
-            status = "🔄 Connecting..."
-        else:
-            status = f"✅ Connected | Updates: {self.monitor.total_messages:,} | Rate: {self.monitor.message_rate:.1f}/s | Last: {age:.3f}s ago"
+        """Update the status line"""
+        current_time = datetime.now()
+        update_age = (current_time - self.last_update_time).total_seconds()
+        self.last_update_time = current_time
         
-        # Status line is at line 20
-        self.update_table_value(20, status)
+        # Count connected stocks
+        connected = sum(1 for monitor in self.monitors if monitor.connected)
+        total_messages = sum(monitor.total_messages for monitor in self.monitors)
+        
+        # Calculate average message rate
+        avg_rate = sum(monitor.message_rate for monitor in self.monitors) / max(len(self.monitors), 1)
+        
+        status = f"🔄 Live Update | Connected: {connected}/{len(self.monitors)} stocks | " \
+                f"Total Messages: {total_messages:,} | Avg Rate: {avg_rate:.1f}/s | " \
+                f"Last Update: {update_age:.2f}s ago | {datetime.now().strftime('%H:%M:%S')}"
+        
+        self.update_table_value(self.status_line, status)
     
     async def run_display(self):
-        """Main display loop - table printed ONCE, only values updated"""
+        """Main display loop - table printed ONCE, values updated in-place"""
         self.is_running = True
         
-        # STEP 1: Clear screen and print table ONE TIME
-        self.clear_screen()
-        self.print_static_table()
-        self.initialized = True
-        
         try:
+            # STEP 1: Print static table ONE TIME ONLY
+            if not self.initialized:
+                self.print_static_table()
+            
             # STEP 2: Continuous update loop - ONLY updates values
             while self.is_running:
-                # Update only the values in the static table
-                self.update_header_line()   # Updates line 5
-                self.update_table_rows()    # Updates lines 8-17
-                self.update_status_line()   # Updates line 20
+                # Update all dynamic values in the static table
+                self.update_stock_rows()    # Updates all stock summary rows
+                self.update_grand_totals()  # Updates grand totals
+                self.update_status_line()   # Updates status
                 
                 # Wait before next update
                 await asyncio.sleep(self.refresh_rate)
@@ -446,12 +645,12 @@ class StaticTableDisplay:
 
 
 async def main():
-    """Main function"""
+    """Main function - automatically monitors ALL stocks"""
     # Updated token
     TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzY4OTgxNzQwLCJpYXQiOjE3Njg4OTUzNDAsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTA4NzAzNTY1In0.YSsmuldr5miDdk7DFLMyuJjIiyfIu4DzMoe2Gp8KmqRI6i6RJBK7giRMaJlOs7iRy_Sxr3BhUy5FIFTDOAvi1Q"
     CLIENT_ID = "1108703565"
     
-    # Popular Indian Stocks
+    # All popular Indian Stocks (automatically selected - no user input)
     available_stocks = {
         "11536": "RELIANCE",
         "1660": "TCS",
@@ -465,44 +664,45 @@ async def main():
         "5258": "WIPRO",
     }
     
-    print("\n" + "="*80)
-    print("📈 STOCK SELECTION")
-    print("="*80)
-    
-    for idx, (stock_id, stock_name) in enumerate(available_stocks.items(), 1):
-        print(f"{idx:2}. {stock_name}")
-    
-    print("="*80)
+    print("\n" + "="*180)
+    print("📊 AUTOMATIC ALL-STOCKS MARKET DEPTH MONITOR")
+    print("="*180)
+    print(f"Starting automatic monitoring of ALL {len(available_stocks)} stocks...")
+    print("="*180 + "\n")
     
     try:
-        # User selection
-        selection = input("\nSelect stock (1-10): ").strip()
+        # Create monitors and clients for ALL stocks
+        monitors = []
+        clients = []
         
-        if selection.isdigit() and 1 <= int(selection) <= 10:
-            stock_id = list(available_stocks.keys())[int(selection)-1]
-            stock_name = available_stocks[stock_id]
-        else:
-            stock_id = "11536"
-            stock_name = "RELIANCE"
-            print(f"Using default: {stock_name}")
+        print("Initializing stock monitors...")
+        for stock_id, stock_name in available_stocks.items():
+            monitor = StockMonitor(stock_id, stock_name)
+            client = WebSocketDepthClient(TOKEN, CLIENT_ID, monitor)
+            monitors.append(monitor)
+            clients.append(client)
+            print(f"  ✓ {stock_name}")
         
-        print(f"\nStarting {stock_name} depth stream...")
-        print("Table will be displayed once. Only values will update in-place.\n")
+        print(f"\n✅ Successfully initialized {len(monitors)} stock monitors")
+        print("Starting WebSocket connections and display...\n")
         
-        # Create monitor, display, and WebSocket client
-        monitor = DepthDataMonitor(stock_id, stock_name)
-        display = StaticTableDisplay(monitor)
-        ws_client = WebSocketDepthClient(TOKEN, CLIENT_ID, monitor)
+        # Create display for all stocks
+        display = AllStocksSummaryDisplay(monitors)
         
         # Wait a moment before starting display
         await asyncio.sleep(1)
         
-        # Run both tasks concurrently
+        # Run all WebSocket clients and display concurrently
         display_task = asyncio.create_task(display.run_display())
-        ws_task = asyncio.create_task(ws_client.start())
         
-        # Wait for both tasks
-        await asyncio.gather(display_task, ws_task)
+        # Start all WebSocket clients
+        client_tasks = []
+        for client in clients:
+            task = asyncio.create_task(client.start())
+            client_tasks.append(task)
+        
+        # Wait for all tasks
+        await asyncio.gather(display_task, *client_tasks)
         
     except KeyboardInterrupt:
         print("\n\n🛑 Stopped by user")
@@ -512,8 +712,14 @@ async def main():
     finally:
         # Cleanup
         print("\n\n✅ Application terminated")
-        if 'monitor' in locals():
-            print(f"Total updates received: {monitor.total_messages:,}")
+        if 'monitors' in locals():
+            total_messages = sum(monitor.total_messages for monitor in monitors)
+            total_bid_qty = sum(monitor.bid_qty_sum for monitor in monitors)
+            total_ask_qty = sum(monitor.ask_qty_sum for monitor in monitors)
+            print(f"Total updates received: {total_messages:,}")
+            print(f"Total Bid Quantity (all stocks): {total_bid_qty:,}")
+            print(f"Total Ask Quantity (all stocks): {total_ask_qty:,}")
+            print(f"Grand Total Quantity: {total_bid_qty + total_ask_qty:,}")
 
 
 if __name__ == "__main__":
