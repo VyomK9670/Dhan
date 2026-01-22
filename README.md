@@ -9,8 +9,6 @@ from typing import Dict, List, Optional
 import os
 import sys
 import csv
-import pandas as pd
-from collections import defaultdict
 import aiofiles
 
 # Configure logging
@@ -44,6 +42,10 @@ class DepthDataMonitor:
         # Initialize CSV with headers
         self.initialize_csv()
     
+    def format_price(self, price: float) -> str:
+        """Format price with 4 decimal places"""
+        return f"{price:.4f}" if price else "0.0000"
+    
     def initialize_csv(self):
         """Initialize CSV file with headers"""
         headers = ['Timestamp', 'Stock']
@@ -51,7 +53,7 @@ class DepthDataMonitor:
         # Add headers for all 100 levels (bids and asks)
         for i in range(1, 101):
             headers.extend([
-                f'Bid_{i}_Price',
+                f'Bid_{i}_Price(₹)',
                 f'Bid_{i}_Quantity',
                 f'Bid_{i}_Orders',
                 f'Bid_{i}_Flags'
@@ -59,7 +61,7 @@ class DepthDataMonitor:
         
         for i in range(1, 101):
             headers.extend([
-                f'Ask_{i}_Price',
+                f'Ask_{i}_Price(₹)',
                 f'Ask_{i}_Quantity',
                 f'Ask_{i}_Orders',
                 f'Ask_{i}_Flags'
@@ -72,35 +74,35 @@ class DepthDataMonitor:
                 writer.writerow(headers)
     
     async def save_to_csv(self):
-        """Save current depth data to CSV"""
+        """Save current depth data to CSV with prices formatted to 4 decimal places"""
         try:
             row = [datetime.now().isoformat(), self.stock_name]
             
-            # Add all bid data (100 levels)
+            # Add all bid data (100 levels) with formatted prices
             for i in range(100):
                 if i < len(self.bids):
                     bid = self.bids[i]
                     row.extend([
-                        bid.get('price', 0.0),
+                        self.format_price(bid.get('price', 0.0)),  # Price with 4 decimals
                         bid.get('quantity', 0),
                         bid.get('orders', 0),
                         bid.get('flags', 0)
                     ])
                 else:
-                    row.extend([0.0, 0, 0, 0])
+                    row.extend(["0.0000", 0, 0, 0])  # Formatted price with 4 decimals
             
-            # Add all ask data (100 levels)
+            # Add all ask data (100 levels) with formatted prices
             for i in range(100):
                 if i < len(self.asks):
                     ask = self.asks[i]
                     row.extend([
-                        ask.get('price', 0.0),
+                        self.format_price(ask.get('price', 0.0)),  # Price with 4 decimals
                         ask.get('quantity', 0),
                         ask.get('orders', 0),
                         ask.get('flags', 0)
                     ])
                 else:
-                    row.extend([0.0, 0, 0, 0])
+                    row.extend(["0.0000", 0, 0, 0])  # Formatted price with 4 decimals
             
             # Write to CSV
             async with aiofiles.open(self.csv_file, 'a', newline='') as f:
@@ -137,13 +139,13 @@ class DepthDataMonitor:
         # Table headers for bids and asks side by side
         header_row = [
             "Level".rjust(6),
-            "Bid Price".rjust(12),
+            "Bid Price(₹)".rjust(14),
             "Bid Qty".rjust(12),
             "Bid Orders".rjust(10),
             "Bid Flags".rjust(8),
             " | ",
             "Level".rjust(6),
-            "Ask Price".rjust(12),
+            "Ask Price(₹)".rjust(14),
             "Ask Qty".rjust(12),
             "Ask Orders".rjust(10),
             "Ask Flags".rjust(8)
@@ -158,7 +160,7 @@ class DepthDataMonitor:
                 bid = self.bids[i]
                 bid_cols = [
                     str(bid.get('level', i+1)).rjust(6),
-                    f"{bid.get('price', 0.0):12.2f}",
+                    f"{bid.get('price', 0.0):14.4f}",  # Display with 4 decimals
                     f"{bid.get('quantity', 0):12,d}",
                     f"{bid.get('orders', 0):10,d}",
                     f"{bid.get('flags', 0):8d}"
@@ -166,7 +168,7 @@ class DepthDataMonitor:
             else:
                 bid_cols = [
                     str(i+1).rjust(6),
-                    "0.00".rjust(12),
+                    "0.0000".rjust(14),  # Display with 4 decimals
                     "0".rjust(12),
                     "0".rjust(10),
                     "0".rjust(8)
@@ -177,7 +179,7 @@ class DepthDataMonitor:
                 ask = self.asks[i]
                 ask_cols = [
                     str(ask.get('level', i+1)).rjust(6),
-                    f"{ask.get('price', 0.0):12.2f}",
+                    f"{ask.get('price', 0.0):14.4f}",  # Display with 4 decimals
                     f"{ask.get('quantity', 0):12,d}",
                     f"{ask.get('orders', 0):10,d}",
                     f"{ask.get('flags', 0):8d}"
@@ -185,7 +187,7 @@ class DepthDataMonitor:
             else:
                 ask_cols = [
                     str(i+1).rjust(6),
-                    "0.00".rjust(12),
+                    "0.0000".rjust(14),  # Display with 4 decimals
                     "0".rjust(12),
                     "0".rjust(10),
                     "0".rjust(8)
@@ -527,6 +529,7 @@ async def main():
         print(f"{idx:2}. {stock_name}")
     print("="*120)
     print("\nInitializing... CSV files will be created for each stock.")
+    print("CSV Format: Prices saved as ₹ values with 4 decimal places (e.g., 1234.5678)")
     print("="*120 + "\n")
     
     # Create monitors and WebSocket clients for all stocks
@@ -579,9 +582,15 @@ async def main():
         # Cleanup
         print("\n\n✅ Application terminated")
         print("="*120)
-        print("CSV Files Created:")
+        print("CSV Files Created (with 4 decimal place prices):")
         for stock_name in monitors:
             print(f"  • {stock_name}_depth_data.csv")
+        print("="*120)
+        
+        # Show sample CSV format
+        print("\nCSV Column Sample (first 5 columns shown):")
+        print("Timestamp, Stock, Bid_1_Price(₹), Bid_1_Quantity, Bid_1_Orders, ...")
+        print("Example: 2024-01-01T12:00:00, RELIANCE, 1234.5678, 1000, 5, ...")
         print("="*120)
 
 
